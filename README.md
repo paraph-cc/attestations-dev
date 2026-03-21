@@ -47,35 +47,41 @@ Two verification files are provided:
 - `verify-lib.js` — pure Web Crypto, importable in a browser or Node.js 18+
 - `verify-cli.js` — command line wrapper, requires Node.js 18+
 
-**Command line:**
+**Simplest — signature only (fetches record and key from GitHub automatically):**
+
+```sh
+node verify-cli.js <signature>
+./verify.sh <signature>
+```
+
+**With local files:**
 
 ```sh
 node verify-cli.js <record.json> <public-key.jwk> [data-file]
+./verify.sh <record.json> <public-key.jwk> [data-file]
 ```
 
+- `signature` — the base64url signature string from an attestation record
 - `record.json` — the attestation JSON (from the API response or this repo)
 - `public-key.jwk` — the public key from the `keys/` directory matching the record's `key_id`
 - `data-file` — optional: your original data file, confirms its SHA-256 matches the record
 
+`verify.sh` requires: `openssl` 3.0+, `jq`, `python3`, `curl`. All standard on Linux and macOS.
+
 Exit code 0 = valid, 1 = invalid.
 
-**Shell (OpenSSL — no Node.js required):**
-
-```sh
-./verify.sh <record.json> <public-key.jwk> [data-file]
-```
-
-Requires: `openssl` 3.0+, `jq`, `python3`. All standard on Linux and macOS.
+Set `PARAPH_REPO=<name>` to verify against a different GitHub repo.
 
 **Browser / ES module:**
 
 ```js
-import { verify, checkHash } from './verify-lib.js';
+import { fetchAndVerify, verify, checkHash } from './verify-lib.js';
 
-const record = await fetch('attestations/2026/03/21/{id}.json').then((r) => r.json());
-const key = await fetch('keys/paraph-2026-01.jwk').then((r) => r.json());
+// Fetch record and key from GitHub automatically
+const { valid, record } = await fetchAndVerify('<signature>');
 
-const valid = await verify(record, key);
+// Or verify with objects you already have
+const valid = await verify(record, publicKeyJwk);
 ```
 
 ## Public keys
