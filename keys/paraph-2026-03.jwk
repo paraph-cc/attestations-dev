@@ -1,0 +1,10 @@
+{
+  "key_ops": [
+    "verify"
+  ],
+  "ext": true,
+  "crv": "Ed25519",
+  "x": "GKbX6Fro79ceb05op6SMlZtoqJ5pfvGD9sIN5Ez3blc",
+  "kty": "OKP",
+  "kid": "paraph-2026-03"
+}
