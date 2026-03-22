@@ -33,7 +33,8 @@ Each record contains:
   "key_id": "paraph-2026-01",
   "timestamp": 1742515200000,
   "sha256": "hex-encoded sha256 of the attested data",
-  "signature": "base64url Ed25519 signature",
+  "signature": "128-char lowercase hex Ed25519 signature",
+  "tsr": "base64-encoded RFC 3161 TimeStampResponse from the TSA",
   "url": "https://github.com/paraph-cc/attestations/blob/main/attestations/ab/cd/{128-hex}.json"
 }
 ```
@@ -42,31 +43,33 @@ If the attestation was created by the server fetching a URL, a `source_url` fiel
 
 ## Verifying an attestation
 
-Two verification files are provided:
+Three verification files are provided in `src/`:
 
-- `verify-lib.js` — pure Web Crypto, importable in a browser or Node.js 18+
-- `verify-cli.js` — command line wrapper, requires Node.js 18+
+- `src/verify-lib.js` — pure Web Crypto, importable in a browser or Node.js 18+
+- `src/verify-cli.js` — command line wrapper, requires Node.js 18+
+- `src/verify.sh` — shell wrapper using openssl, jq, python3, curl
 
-**Simplest — signature only (fetches record and key from GitHub automatically):**
-
-```sh
-node verify-cli.js <signature>
-./verify.sh <signature>
-```
-
-**With local files:**
+Pass the signature and your original file — the verifier fetches the attestation record and public key from GitHub automatically:
 
 ```sh
-node verify-cli.js <record.json> <public-key.jwk> [data-file]
-./verify.sh <record.json> <public-key.jwk> [data-file]
+./src/verify.sh <signature> <data-file>
+node src/verify-cli.js <signature> <data-file>
 ```
 
-- `signature` — the base64url signature string from an attestation record
-- `record.json` — the attestation JSON (from the API response or this repo)
-- `public-key.jwk` — the public key from the `keys/` directory matching the record's `key_id`
-- `data-file` — optional: your original data file, confirms its SHA-256 matches the record
+Data can also be piped in:
 
-`verify.sh` requires: `openssl` 3.0+, `jq`, `python3`, `curl`. All standard on Linux and macOS.
+```sh
+cat broken-window.jpg | ./src/verify.sh <signature>
+```
+
+**With local record and key files (no network required):**
+
+```sh
+./src/verify.sh <record.json> <public-key.jwk> <data-file>
+node src/verify-cli.js <record.json> <public-key.jwk> <data-file>
+```
+
+`src/verify.sh` requires: `openssl` 3.0+, `jq`, `python3`, `curl`. All standard on Linux and macOS.
 
 Exit code 0 = valid, 1 = invalid.
 
@@ -75,13 +78,11 @@ Set `PARAPH_REPO=<name>` to verify against a different GitHub repo.
 **Browser / ES module:**
 
 ```js
-import { fetchAndVerify, verify, checkHash } from './verify-lib.js';
+import { fetchAndVerify } from './src/verify-lib.js';
 
-// Fetch record and key from GitHub automatically
-const { valid, record } = await fetchAndVerify('<signature>');
-
-// Or verify with objects you already have
-const valid = await verify(record, publicKeyJwk);
+const { valid, dataMatch } = await fetchAndVerify(signature, { data: fileBytes });
+// valid     — signature checks out
+// dataMatch — your file's sha256 matches the record
 ```
 
 ## Public keys
@@ -96,10 +97,31 @@ Keys are never deleted — retired keys remain so old attestations can always be
 
 ## What this proves
 
-An attestation is a **self-attested timestamp** signed by the Paraph service. It proves:
+Each attestation record contains two independent timestamps:
 
-- The Paraph service saw data with this SHA-256
-- At the time indicated by the timestamp field
-- The record has not been tampered with (signature would break)
+**Ed25519 signature** — signed by the Paraph service key over `timestamp || sha256(data)`. Proves the Paraph service saw this data at this moment. Verifiable with the public key in `keys/`.
 
-It does **not** provide a trusted third-party timestamp (RFC 3161). The timestamp is set by the Paraph service clock at the moment of signing.
+**RFC 3161 TSA token** (`tsr` field) — an independent timestamp from a trusted third-party TSA, covering `sha256(data)`. Verifiable with standard tools (`openssl ts -verify`) against the TSA's certificate chain, with no dependency on Paraph at all.
+
+Together they mean: even if you distrust Paraph, the TSA independently witnessed the same data hash at a time consistent with the Ed25519 timestamp.
+
+For full RFC 3161 chain verification you need the TSA's root certificate in your trust store.
+
+**Sectigo** (`http://timestamp.sectigo.com`) — root is in all standard system CA bundles.
+No extra configuration needed; chain verification works out of the box.
+
+**FreeTSA** (`https://freetsa.org/tsr`) — a free community service whose root is _not_
+in the standard system CA bundle. Download their root cert and pass it via `TSA_CA_FILE`:
+
+```sh
+curl -O https://www.freetsa.org/files/cacert.pem
+TSA_CA_FILE=cacert.pem ./src/verify.sh <signature> <data-file>
+TSA_CA_FILE=cacert.pem node src/verify-cli.js <signature> <data-file>
+```
+
+If you use FreeTSA, consider donating at [freetsa.org](https://www.freetsa.org) —
+it is run as a free community service.
+
+The TSA used for any given attestation is identified by the certificate embedded in the
+`tsr` field itself — you do not need to know the TSA URL in advance. Use `src/inspect-cli.js`
+or `src/inspect.sh` to see which TSA signed a record.
